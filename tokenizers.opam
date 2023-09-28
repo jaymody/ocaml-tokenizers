@@ -8,14 +8,20 @@ homepage: "https://github.com/jaymody/ocaml-tokenizers"
 bug-reports: "https://github.com/jaymody/ocaml-tokenizers/issues"
 build: ["dune" "build" "-p" name "-j" jobs]
 depends: [
-    "ocaml" {="5.0.0"}
-    "core_unix"
+    "ocaml"
+    "dune"
     "batteries"
     "yojson"
-    "dune"
     "re"
-    # dev dependencies
-    "ocaml-lsp-server"
-    "ocamlformat"
-    "utop"
+    "algos"
+    # Dev Dependencies
+    #
+    # I'm using with-test for dev dependencies as the with-dev-setup option
+    # is only available in opam 2.2.0, which is in alpha
+    "ocaml-lsp-server" { with-test }
+    "ocamlformat" { with-test }
+    "utop" { with-test }
+]
+pin-depends: [
+    [ "algos.dev" "git+https://github.com/jaymody/ocaml-algos.git" ]
 ]
