@@ -2,6 +2,8 @@ let main (vocab_file, merges_file) =
   let text = In_channel.input_all stdin in
   let tokenizer = Tokenizers.Bpe.Tokenizer.load vocab_file merges_file in
   let ids = Tokenizers.Bpe.Tokenizer.encode tokenizer text in
+  let reconstructed_text = Tokenizers.Bpe.Tokenizer.decode tokenizer ids in
+  assert (reconstructed_text = text);
   List.iter (fun x -> Printf.printf "%d\n" x) ids
 ;;
 

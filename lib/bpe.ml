@@ -29,30 +29,39 @@ let load_merges filepath =
 ;;
 
 let encode_bytes_to_visible_unicode text =
-  BatUTF8.map
-    (fun c ->
-      BatUChar.of_int
-        (match BatUChar.int_of c with
-         | i when i < 33 -> 256 + i
-         | i when 126 < i && i < 161 -> 162 + i (* 256 + 33 + (i - 127) *)
-         | 173 -> 323 (* 256 + 33 + (161 - 127) *)
-         | i -> i))
+  String.fold_left
+    (fun s c ->
+      (match Char.code c with
+       | i when i < 33 -> 256 + i
+       | i when 126 < i && i < 161 -> 162 + i (* 256 + 33 + (i - 127) *)
+       | 173 -> 323 (* 256 + 33 + (161 - 127) *)
+       | i -> i)
+      |> BatUChar.of_int
+      |> BatUTF8.of_char
+      |> BatBytes.of_string
+      |> BatBytes.cat s)
+    BatBytes.empty
     text
+  |> BatBytes.to_string
 ;;
 
 let decode_visible_unicode_to_bytes text =
-  BatUTF8.map
-    (fun c ->
-      BatUChar.of_int
-        (match BatUChar.int_of c with
-         | i when 255 < i && i < 289 -> i - 256
-         | i when 288 < i && i < 323 -> i - 162
-         | 323 -> 173
-         | i -> i))
+  BatUTF8.fold
+    (fun s c ->
+      (match BatUChar.code c with
+       | i when 255 < i && i < 289 -> i - 256
+       | i when 288 < i && i < 323 -> i - 162
+       | 323 -> 173
+       | i -> i)
+      |> Char.chr
+      |> BatBytes.make 1
+      |> BatBytes.cat s)
+    BatBytes.empty
     text
+  |> BatBytes.to_string
 ;;
 
-let[@warning "-32-26"] bpe text ranks =
+let bpe text ranks =
   let module Token = struct
     type t =
       { i : int
@@ -84,10 +93,6 @@ let[@warning "-32-26"] bpe text ranks =
 
     let compare { score = score1; _ } { score = score2; _ } = score1 - score2
     let merge { l; r; _ } = Token.merge l r
-
-    let to_str { l; r; score } =
-      "(" ^ Token.to_str l ^ ", " ^ Token.to_str r ^ ", " ^ Int.to_string score ^ ")"
-    ;;
   end
   in
   let module PairPq = Algos.Pq.Make (Pair) in
@@ -102,19 +107,28 @@ let[@warning "-32-26"] bpe text ranks =
     in
     aux 0 Tokens.empty
   in
-  let tokens_to_str tokens =
-    tokens
-    |> Tokens.to_list
-    |> List.map fst
-    |> List.map Token.to_str
-    |> List.iter (fun s -> Printf.printf "%s " s);
-    print_endline ""
-  in
-  let pq_to_str pq =
-    PairPq.to_list pq
-    |> List.map Pair.to_str
-    |> List.iter (fun s -> Printf.printf "%s " s);
-    print_endline ""
+  let[@warning "-32-27"] print_info tokens pq =
+    (* let pair_to_str ({ l; r; score } : Pair.t) =
+      "(" ^ Token.to_str l ^ ", " ^ Token.to_str r ^ ", " ^ Int.to_string score ^ ")"
+    in
+    let tokens_to_str tokens =
+      tokens
+      |> Tokens.to_list
+      |> List.map fst
+      |> List.map Token.to_str
+      |> List.iter (fun s -> Printf.printf "%s " s);
+      print_endline ""
+    in
+    let pq_to_str pq =
+      PairPq.to_list pq
+      |> List.map pair_to_str
+      |> List.iter (fun s -> Printf.printf "%s " s);
+      print_endline ""
+    in
+    tokens_to_str tokens;
+    pq_to_str pq;
+    print_endline "-----" *)
+    ()
   in
   let push_pair_opt pq = function
     | None -> pq
@@ -162,9 +176,7 @@ let[@warning "-32-26"] bpe text ranks =
       let new_token = Pair.merge pair in
       let tokens = Tokens.insert new_token "throwaway" tokens in
       let pq = update_prev_next new_token tokens pq in
-      tokens_to_str tokens;
-      pq_to_str pq;
-      print_endline "-----";
+      print_info tokens pq;
       tokens, pq)
     else tokens, pq
   in
@@ -173,9 +185,7 @@ let[@warning "-32-26"] bpe text ranks =
     | None, _ -> tokens
     | Some pair, pq -> aux (merge_pair tokens pq pair)
   in
-  tokens_to_str init_tokens;
-  pq_to_str init_pq;
-  print_endline "-----";
+  print_info init_tokens init_pq;
   aux (init_tokens, init_pq) |> Tokens.to_list |> List.map fst |> List.map Token.to_str
 ;;
 
