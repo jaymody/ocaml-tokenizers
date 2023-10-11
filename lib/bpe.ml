@@ -130,7 +130,7 @@ let bpe text ranks =
       | Tokens.Node n ->
         if token.i = n.k.j
         then Pair.create n.k token
-        else if token.i < n.k.i
+        else if token.i < n.k.j
         then get_prev n.l
         else get_prev n.r
     in
@@ -139,7 +139,7 @@ let bpe text ranks =
       | Tokens.Node n ->
         if token.j = n.k.i
         then Pair.create token n.k
-        else if token.i < n.k.i
+        else if token.j < n.k.i
         then get_next n.l
         else get_next n.r
     in
