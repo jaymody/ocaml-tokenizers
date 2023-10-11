@@ -71,11 +71,6 @@ let bpe text ranks =
     let create i j = { i; j }
     let compare a b = if a.i = b.i then a.j - b.j else a.i - b.i
     let to_str { i; j } = String.sub text i (j - i)
-
-    let merge a b =
-      assert (a.j = b.i);
-      { i = a.i; j = b.j }
-    ;;
   end
   in
   let module Pair = struct
@@ -91,22 +86,16 @@ let bpe text ranks =
       | Some score -> Some { l; r; score }
     ;;
 
-    let compare { score = score1; _ } { score = score2; _ } = score1 - score2
-    let merge { l; r; _ } = Token.merge l r
+    let compare a b = a.score - b.score
+
+    let merge { l; r; _ } : Token.t =
+      assert (l.j = r.i);
+      { i = l.i; j = r.j }
+    ;;
   end
   in
   let module PairPq = Algos.Pq.Make (Pair) in
   let module Tokens = Algos.Avl.Make (Token) in
-  let init_tokens =
-    let len = String.length text in
-    let rec aux i acc =
-      let j = BatUTF8.next text i in
-      if j < len
-      then aux j (Tokens.insert (Token.create i j) "throwaway" acc)
-      else Tokens.insert (Token.create i j) "throwaway" acc
-    in
-    aux 0 Tokens.empty
-  in
   let[@warning "-32-27"] print_info tokens pq =
     (* let pair_to_str ({ l; r; score } : Pair.t) =
       "(" ^ Token.to_str l ^ ", " ^ Token.to_str r ^ ", " ^ Int.to_string score ^ ")"
@@ -130,43 +119,31 @@ let bpe text ranks =
     print_endline "-----" *)
     ()
   in
-  let push_pair_opt pq = function
-    | None -> pq
-    | Some p -> PairPq.push p pq
-  in
-  let init_pq =
-    let rec aux pq = function
-      | a :: (b :: _ as tl) ->
-        aux
-          (match Pair.create a b with
-           | None -> pq
-           | Some pair -> PairPq.push pair pq)
-          tl
-      | _ -> pq
+  let update_prev_next (token : Token.t) tokens pq =
+    let push_pair_opt pair pq =
+      match pair with
+      | None -> pq
+      | Some pair -> PairPq.push pair pq
     in
-    Tokens.to_list init_tokens |> List.map fst |> aux PairPq.empty
-  in
-  let update_prev_next (new_token : Token.t) tokens pq =
-    let rec update_prev pq = function
-      | Tokens.Empty -> pq
+    let rec get_prev = function
+      | Tokens.Empty -> None
       | Tokens.Node n ->
-        if new_token.i = n.k.j
-        then push_pair_opt pq (Pair.create n.k new_token)
-        else if new_token.i < n.k.i
-        then update_prev pq n.l
-        else update_prev pq n.r
+        if token.i = n.k.j
+        then Pair.create n.k token
+        else if token.i < n.k.i
+        then get_prev n.l
+        else get_prev n.r
     in
-    let rec update_next pq = function
-      | Tokens.Empty -> pq
+    let rec get_next = function
+      | Tokens.Empty -> None
       | Tokens.Node n ->
-        if new_token.j = n.k.i
-        then push_pair_opt pq (Pair.create new_token n.k)
-        else if new_token.i < n.k.i
-        then update_next pq n.l
-        else update_next pq n.r
+        if token.j = n.k.i
+        then Pair.create token n.k
+        else if token.i < n.k.i
+        then get_next n.l
+        else get_next n.r
     in
-    let pq = update_prev pq tokens in
-    update_next pq tokens
+    pq |> push_pair_opt (get_prev tokens) |> push_pair_opt (get_next tokens)
   in
   let merge_pair tokens pq (pair : Pair.t) =
     if Option.is_some (Tokens.find pair.l tokens)
@@ -184,6 +161,28 @@ let bpe text ranks =
     match PairPq.pop pq with
     | None, _ -> tokens
     | Some pair, pq -> aux (merge_pair tokens pq pair)
+  in
+  let init_tokens =
+    let len = String.length text in
+    let rec aux i acc =
+      let j = BatUTF8.next text i in
+      if j < len
+      then aux j (Tokens.insert (Token.create i j) "throwaway" acc)
+      else Tokens.insert (Token.create i j) "throwaway" acc
+    in
+    aux 0 Tokens.empty
+  in
+  let init_pq =
+    let rec aux pq = function
+      | a :: (b :: _ as tl) ->
+        aux
+          (match Pair.create a b with
+           | None -> pq
+           | Some pair -> PairPq.push pair pq)
+          tl
+      | _ -> pq
+    in
+    Tokens.to_list init_tokens |> List.map fst |> aux PairPq.empty
   in
   print_info init_tokens init_pq;
   aux (init_tokens, init_pq) |> Tokens.to_list |> List.map fst |> List.map Token.to_str
