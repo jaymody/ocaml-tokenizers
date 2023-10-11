@@ -1,6 +1,5 @@
 /_build/
 /_opam/
-/data/
 
 # ignore venv with tiktoken installation (used for testing)
 .venv
