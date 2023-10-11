@@ -86,9 +86,21 @@ let bpe text ranks =
       | Some score -> Some { l; r; score }
     ;;
 
-    let compare a b = a.score - b.score
+    (* Note, we not only need to compare score, but also the starting positions.
+       Consider the following list of tokens [a; a; a]. If "a a" is a merge,
+       then which do we merge first? The first pair of a's, or the second? To be
+       consistent tiktoken, we prioritize by start position if there are
+       multiple of the same merge pairs. *)
+    let compare =
+      Utils.compare_in_order
+        [ (fun a b -> a.score - b.score)
+        ; (fun a b -> Token.compare a.l b.l)
+        ; (fun a b -> Token.compare a.r b.r) (* technically this shouldn't be needed *)
+        ]
+    ;;
 
     let merge { l; r; _ } : Token.t =
+      (* TODO: maybe remove the assert? *)
       assert (l.j = r.i);
       { i = l.i; j = r.j }
     ;;
@@ -96,96 +108,60 @@ let bpe text ranks =
   in
   let module PairPq = Algos.Pq.Make (Pair) in
   let module Tokens = Algos.Avl.Make (Token) in
-  let[@warning "-32-27"] print_info tokens pq =
-    (* let pair_to_str ({ l; r; score } : Pair.t) =
-      "(" ^ Token.to_str l ^ ", " ^ Token.to_str r ^ ", " ^ Int.to_string score ^ ")"
-    in
-    let tokens_to_str tokens =
-      tokens
-      |> Tokens.to_list
-      |> List.map fst
-      |> List.map Token.to_str
-      |> List.iter (fun s -> Printf.printf "%s " s);
-      print_endline ""
-    in
-    let pq_to_str pq =
-      PairPq.to_list pq
-      |> List.map pair_to_str
-      |> List.iter (fun s -> Printf.printf "%s " s);
-      print_endline ""
-    in
-    tokens_to_str tokens;
-    pq_to_str pq;
-    print_endline "-----" *)
-    ()
-  in
-  let update_prev_next (token : Token.t) tokens pq =
-    let push_pair_opt pair pq =
-      match pair with
-      | None -> pq
-      | Some pair -> PairPq.push pair pq
-    in
-    let rec get_prev = function
+  let push_pq_opt pq = Option.fold ~none:pq ~some:(fun p -> PairPq.push p pq) in
+  let get_prev_pair (token : Token.t) =
+    let rec aux = function
       | Tokens.Empty -> None
       | Tokens.Node n ->
         if token.i = n.k.j
         then Pair.create n.k token
         else if token.i < n.k.j
-        then get_prev n.l
-        else get_prev n.r
+        then aux n.l
+        else aux n.r
     in
-    let rec get_next = function
+    aux
+  in
+  let get_next_pair (token : Token.t) =
+    let rec aux = function
       | Tokens.Empty -> None
       | Tokens.Node n ->
         if token.j = n.k.i
         then Pair.create token n.k
         else if token.j < n.k.i
-        then get_next n.l
-        else get_next n.r
+        then aux n.l
+        else aux n.r
     in
-    pq |> push_pair_opt (get_prev tokens) |> push_pair_opt (get_next tokens)
+    aux
   in
-  let merge_pair tokens pq (pair : Pair.t) =
-    if Option.is_some (Tokens.find pair.l tokens)
-       && Option.is_some (Tokens.find pair.r tokens)
-    then (
-      let tokens = tokens |> Tokens.pop pair.l |> snd |> Tokens.pop pair.r |> snd in
-      let new_token = Pair.merge pair in
-      let tokens = Tokens.insert new_token "throwaway" tokens in
-      let pq = update_prev_next new_token tokens pq in
-      print_info tokens pq;
-      tokens, pq)
-    else tokens, pq
-  in
-  let rec aux (tokens, pq) =
+  let rec merge_pairs tokens pq =
     match PairPq.pop pq with
     | None, _ -> tokens
-    | Some pair, pq -> aux (merge_pair tokens pq pair)
+    | Some pair, pq ->
+      (match Tokens.find pair.l tokens, Tokens.find pair.r tokens with
+       | Some _, Some _ ->
+         let tokens = tokens |> Tokens.pop pair.l |> snd |> Tokens.pop pair.r |> snd in
+         let merged_token = Pair.merge pair in
+         let tokens = Tokens.insert merged_token "throwaway" tokens in
+         let pq = push_pq_opt pq (get_prev_pair merged_token tokens) in
+         let pq = push_pq_opt pq (get_next_pair merged_token tokens) in
+         merge_pairs tokens pq
+       | _ -> merge_pairs tokens pq)
   in
-  let init_tokens =
-    let len = String.length text in
-    let rec aux i acc =
-      let j = BatUTF8.next text i in
-      if j < len
-      then aux j (Tokens.insert (Token.create i j) "throwaway" acc)
-      else Tokens.insert (Token.create i j) "throwaway" acc
-    in
-    aux 0 Tokens.empty
+  let tokens_list =
+    List.map (fun (i, j) -> Token.create i j) (Utils.utf8_indices text |> Utils.get_pairs)
   in
-  let init_pq =
-    let rec aux pq = function
-      | a :: (b :: _ as tl) ->
-        aux
-          (match Pair.create a b with
-           | None -> pq
-           | Some pair -> PairPq.push pair pq)
-          tl
-      | _ -> pq
-    in
-    Tokens.to_list init_tokens |> List.map fst |> aux PairPq.empty
-  in
-  print_info init_tokens init_pq;
-  aux (init_tokens, init_pq) |> Tokens.to_list |> List.map fst |> List.map Token.to_str
+  merge_pairs
+    (List.fold_left
+       (fun tokens t -> Tokens.insert t "throwaway" tokens)
+       Tokens.empty
+       tokens_list)
+    (List.fold_left
+       (fun pq (l, r) -> push_pq_opt pq (Pair.create l r))
+       PairPq.empty
+       (Utils.get_pairs tokens_list))
+  |> Tokens.to_list
+  |> List.map fst
+  |> List.map Token.to_str
 ;;
 
 module Tokenizer : sig
