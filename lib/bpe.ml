@@ -164,37 +164,29 @@ let bpe text ranks =
   |> List.map Token.to_str
 ;;
 
-module Tokenizer : sig
-  type t
+type t =
+  { stoi : (string, int) Hashtbl.t
+  ; itos : (int, string) Hashtbl.t
+  ; ranks : (string * string, int) Hashtbl.t
+  }
 
-  val load : string -> string -> t
-  val encode : t -> string -> int list
-  val decode : t -> int list -> string
-end = struct
-  type t =
-    { stoi : (string, int) Hashtbl.t
-    ; itos : (int, string) Hashtbl.t
-    ; ranks : (string * string, int) Hashtbl.t
-    }
+let load vocab_filepath merges_filepath =
+  let stoi = load_vocab vocab_filepath in
+  let itos = Utils.reverse_hashtbl stoi in
+  let ranks = load_merges merges_filepath in
+  { stoi; itos; ranks }
+;;
 
-  let load vocab_filepath merges_filepath =
-    let stoi = load_vocab vocab_filepath in
-    let itos = Utils.reverse_hashtbl stoi in
-    let ranks = load_merges merges_filepath in
-    { stoi; itos; ranks }
-  ;;
+let encode { stoi; ranks; _ } text =
+  let text = encode_bytes_to_visible_unicode text in
+  let tokens = bpe text ranks in
+  let ids = List.map (Hashtbl.find stoi) tokens in
+  ids
+;;
 
-  let encode { stoi; ranks; _ } text =
-    let text = encode_bytes_to_visible_unicode text in
-    let tokens = bpe text ranks in
-    let ids = List.map (Hashtbl.find stoi) tokens in
-    ids
-  ;;
-
-  let decode { itos; _ } ids =
-    let tokens = List.map (Hashtbl.find itos) ids in
-    let text = String.concat "" tokens in
-    let text = decode_visible_unicode_to_bytes text in
-    text
-  ;;
-end
+let decode { itos; _ } ids =
+  let tokens = List.map (Hashtbl.find itos) ids in
+  let text = String.concat "" tokens in
+  let text = decode_visible_unicode_to_bytes text in
+  text
+;;
