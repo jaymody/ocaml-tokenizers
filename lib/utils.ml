@@ -1,17 +1,11 @@
-let reverse_hashtbl tbl =
-  let t = Hashtbl.create (Hashtbl.length tbl) in
-  Hashtbl.iter (fun k v -> Hashtbl.add t v k) tbl;
-  t
-;;
+open! Core
 
-let compare_in_order comparators a b =
-  let rec aux = function
-    | [] -> 0
-    | f :: fs ->
-      let v = f a b in
-      if v = 0 then aux fs else v
-  in
-  aux comparators
+let reverse_hashtbl
+      (type v)
+      (module V : Hashtbl.Key with type t = v)
+      (tbl : (_, v) Hashtbl.t)
+  =
+  tbl |> Hashtbl.to_alist |> List.map ~f:Tuple2.swap |> Hashtbl.of_alist_exn (module V)
 ;;
 
 let get_pairs =
@@ -22,11 +16,54 @@ let get_pairs =
   aux
 ;;
 
-let utf8_indices text =
-  let len = String.length text in
-  let[@tail_mod_cons] rec aux i =
-    let j = BatUTF8.next text i in
-    if j < len then i :: aux j else [ i; j ]
-  in
-  aux 0
-;;
+module type Elt = sig
+  type t
+
+  val compare : t -> t -> int
+end
+
+module Make_pq (Elt : Elt) : sig
+  type t
+
+  val push : t -> Elt.t -> t
+  val pop : t -> Elt.t option * t
+  val of_list : Elt.t list -> t
+end = struct
+  type t = (Elt.t, unit) Avltree.t
+
+  let compare = [%compare: Elt.t]
+  let empty = Avltree.empty
+
+  let pop t =
+    match Avltree.first t with
+    | None -> None, t
+    | Some (first, ()) -> Some first, Avltree.remove t first ~removed:(ref false) ~compare
+  ;;
+
+  let push t x = Avltree.add t ~key:x ~data:() ~replace:false ~added:(ref false) ~compare
+  let of_list = List.fold ~init:empty ~f:push
+end
+
+module Make_avl (Elt : Elt) : sig
+  type t = (Elt.t, unit) Avltree.t
+
+  val mem : t -> Elt.t -> bool
+  val pop : t -> Elt.t -> t
+  val add : t -> Elt.t -> t
+  val to_list : t -> Elt.t list
+  val of_list : Elt.t list -> t
+end = struct
+  type t = (Elt.t, unit) Avltree.t
+
+  let compare = [%compare: Elt.t]
+  let empty = Avltree.empty
+  let mem = Avltree.mem ~compare
+  let pop = Avltree.remove ~removed:(ref false) ~compare
+  let add t key = Avltree.add t ~key ~data:() ~replace:false ~added:(ref false) ~compare
+
+  let to_list t =
+    t |> Avltree.fold ~init:[] ~f:(fun ~key ~data:() acc -> key :: acc) |> List.rev
+  ;;
+
+  let of_list = List.fold ~init:empty ~f:add
+end

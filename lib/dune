@@ -1,3 +1,5 @@
 (library
  (name tokenizers)
- (libraries yojson batteries algos))
+ (libraries yojson core)
+ (preprocess
+  (pps ppx_jane)))
